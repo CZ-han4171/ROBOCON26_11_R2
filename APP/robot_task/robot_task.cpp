@@ -38,6 +38,7 @@ extern osThreadId_t uart4ProcessTaskHandle;
 extern osThreadId_t uart5ProcessTaskHandle;
 extern osThreadId_t uart1ProcessTaskHandle;
 extern osThreadId_t uart6ProcessTaskHandle;
+extern osThreadId_t uart7ProcessTaskHandle;
 extern osThreadId_t uart8ProcessTaskHandle;
 extern osThreadId_t uart9ProcessTaskHandle;
 extern osThreadId_t uart10ProcessTaskHandle; 
@@ -168,4 +169,12 @@ void osTaskInit(void) {
   };
   uart3SendTaskHandle =
       osThreadNew(uart3SendTask, NULL, &Uart3SendTaskHandle_attributes);
+      //uart7用于同视觉/上位机串口通信
+  const osThreadAttr_t Uart7ProcessTaskHandle_attributes = {
+      .name = "Uart7Process_TaskHandle",
+      .stack_size = 512 * 4,
+      .priority = (osPriority_t)osPriorityNormal,
+  };
+  uart7ProcessTaskHandle =
+      osThreadNew(uart7RxProcessTask, NULL, &Uart7ProcessTaskHandle_attributes);
 }

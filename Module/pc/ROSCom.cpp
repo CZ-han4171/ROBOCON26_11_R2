@@ -25,14 +25,14 @@ uint16_t ROSProtocol::processData(uint8_t byte) {
   // 解析协议
   switch (rx_state_) {
   case ros_protocol_state::CHECK_HEAD1:
-    if (byte == HEADER1) {
+    if (byte == ROS_HEADER1) {
       rx_state_ = ros_protocol_state::CHECK_HEAD2;
     } else {
       rx_state_ = ros_protocol_state::CHECK_HEAD1;
     }
     break;
   case ros_protocol_state::CHECK_HEAD2:
-    if (byte == HEADER2) {
+    if (byte == ROS_HEADER2) {
       rx_state_ = ros_protocol_state::CHECK_ID;
     } else {
       rx_state_ = ros_protocol_state::CHECK_HEAD1;
@@ -73,7 +73,7 @@ uint16_t ROSProtocol::processData(uint8_t byte) {
     }
     break;
   case ros_protocol_state::CHECK_TAIL1:
-    if (byte == TAIL1) {
+    if (byte == ROS_TAIL1) {
       rx_state_ = ros_protocol_state::CHECK_TAIL2;
     } else {
       rx_state_ = ros_protocol_state::CHECK_HEAD1;
@@ -81,7 +81,7 @@ uint16_t ROSProtocol::processData(uint8_t byte) {
     }
     break;
   case ros_protocol_state::CHECK_TAIL2:
-    if (byte == TAIL2) {
+    if (byte == ROS_TAIL2) {
       onFrameComplete();
       resetState();
       return static_cast<uint16_t>(bag_id_);
@@ -130,8 +130,8 @@ void ROSProtocol::onFrameComplete() {
   @return 完整的一帧数据长度
 */
 uint8_t ROSProtocol::packQRMsg(uint8_t buf[], uint8_t QRCodetype) {
-  buf[0] = HEADER1;
-  buf[1] = HEADER2;
+  buf[0] = ROS_HEADER1;
+  buf[1] = ROS_HEADER2;
   buf[2] = static_cast<uint8_t>(package_id::QR_CODE_BAG);
   buf[3] = sizeof(QRCodeBag);
   buf[4] = QRCodetype;
@@ -140,8 +140,8 @@ uint8_t ROSProtocol::packQRMsg(uint8_t buf[], uint8_t QRCodetype) {
 
   buf[4 + sizeof(QRCodeBag)] = crcTx.byte_8[0];
   buf[5 + sizeof(QRCodeBag)] = crcTx.byte_8[1];
-  buf[6 + sizeof(QRCodeBag)] = TAIL1;
-  buf[7 + sizeof(QRCodeBag)] = TAIL2;
+  buf[6 + sizeof(QRCodeBag)] = ROS_TAIL1;
+  buf[7 + sizeof(QRCodeBag)] = ROS_TAIL2;
   return 8 + sizeof(QRCodeBag);
 }
 
