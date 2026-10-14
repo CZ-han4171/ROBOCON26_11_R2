@@ -35,6 +35,9 @@
 #include "topic_pool.h"
 #include "usart.h"
 
+#include "vision_com.hpp"
+#include "vision_protocol.hpp"
+
 #include "control_Traject.hpp"
 
 #include "chassis_solution.hpp" //访问底盘控制器用于串口调参
@@ -175,6 +178,32 @@ pub_motor_status motor_status_data{};
 osSemaphoreId_t usbcdc_rx_semphore = NULL;
 ROSProtocol ros_protocol(nullptr, &UsbPort::Instance());
 
+//uart7
+#define UART7_RX_DMA_BUF_SIZE 128
+#define UART7_TX_DMA_BUF_SIZE 128
+static uint8_t uart7_rx_dma_buf[UART7_RX_DMA_BUF_SIZE] DMA_BUFFER_ATTR;
+static uint8_t uart7_tx_dma_buf[UART7_TX_DMA_BUF_SIZE] DMA_BUFFER_ATTR;
+
+static void onUart7RxCb(const uint8_t *data, size_t len, void *user);
+
+UartPort uart7_port(&huart7, DMA_USE::DMA_on,
+                    uart7_rx_dma_buf, sizeof(uart7_rx_dma_buf),
+                    uart7_tx_dma_buf, sizeof(uart7_tx_dma_buf),
+                    onUart7RxCb, nullptr);
+
+osSemaphoreId_t uart7_rx_semphore = NULL;
+osThreadId_t uart7ProcessTaskHandle;
+
+VisionProtocol vision_protocol;
+VisionCom vision_com;
+
+TypedTopicPublisher<VisionNavPoseMsg> vision_nav_pose_pub("vision_nav_pose");
+TypedTopicPublisher<uint16_t> vision_code_pub("vision_code");
+
+/* 【调试】最近一次收到的 0x0101 导航/雷达位姿, 供 Ozone 观察验证解析 */
+volatile VisionNavPoseMsg g_vision_nav_pose{};
+volatile uint32_t g_vision_nav_pose_rx_count = 0;
+
 uint8_t comServiceInit() {
   // can外设初始化
   canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
@@ -243,6 +272,12 @@ uint8_t comServiceInit() {
     return 1;
   }
 
+  uart7_rx_semphore = osSemaphoreNew(1, 0, NULL);
+  if (uart7_rx_semphore == NULL || uart7_port.startRx() != HAL_OK) {
+    return 1;
+  }
+  (void)vision_com.init(&uart7_port);
+
   // position模块初始化
   position.init();
 
@@ -288,6 +323,58 @@ void onUsbRxCb(const uint8_t *data, size_t len, void *user) {
   (void)user;
   if (data != nullptr && len > 0 && usbcdc_rx_semphore != NULL) {
     (void)osSemaphoreRelease(usbcdc_rx_semphore);
+  }
+}
+
+static void onUart7RxCb(const uint8_t *data, size_t len, void *user) {
+  (void)data;
+  (void)len;
+  (void)user;
+  if (uart7_rx_semphore != NULL)
+    (void)osSemaphoreRelease(uart7_rx_semphore);
+}
+
+static void visionDispatch(const VisionProtocol::Frame &frame) {
+  switch (frame.code) {
+  case VisionProtocol::DOWN_NAV_POSE: {
+    if (frame.payload_len < 6)
+      break;
+    VisionNavPoseMsg msg{};
+    // payload 内 int16 为小端
+    msg.x_mm = static_cast<int16_t>(frame.payload[0] |
+                                    (frame.payload[1] << 8));
+    msg.y_mm = static_cast<int16_t>(frame.payload[2] |
+                                    (frame.payload[3] << 8));
+    msg.yaw_deg = static_cast<int16_t>(frame.payload[4] |
+                                       (frame.payload[5] << 8));
+    vision_nav_pose_pub.Publish(msg);
+    // 【调试】逐字段存入全局变量(volatile 结构体不支持整体赋值), 供 Ozone 观察验证解析
+    g_vision_nav_pose.x_mm = msg.x_mm;
+    g_vision_nav_pose.y_mm = msg.y_mm;
+    g_vision_nav_pose.yaw_deg = msg.yaw_deg;
+    ++g_vision_nav_pose_rx_count;
+    break;
+  }
+  case VisionProtocol::DOWN_ESTOP:
+  case VisionProtocol::DOWN_PATH_FORWARD:
+  case VisionProtocol::DOWN_PATH_BACKWARD:
+  case VisionProtocol::DOWN_PATH_TURN_LEFT_90:
+  case VisionProtocol::DOWN_PATH_TURN_RIGHT_90:
+  case VisionProtocol::DOWN_PATH_SHIFT_LEFT:
+  case VisionProtocol::DOWN_PATH_SHIFT_RIGHT:
+  case VisionProtocol::DOWN_PATH_GRAB_LOW_KFS:
+  case VisionProtocol::DOWN_PATH_GRAB_MID_KFS:
+  case VisionProtocol::DOWN_PATH_GRAB_HIGH_KFS:
+  case VisionProtocol::DOWN_PATH_REPLACE_KFS:
+  case VisionProtocol::DOWN_PATH_NO_COMMAND:
+  case VisionProtocol::DOWN_PATH_TURN_AROUND_180:
+  case VisionProtocol::DOWN_PATH_MOVE_TO_COL1:
+  case VisionProtocol::DOWN_PATH_MOVE_TO_COL2:
+  case VisionProtocol::DOWN_PATH_MOVE_TO_COL3:
+    vision_code_pub.Publish(frame.code); // 动作类直接透传业务码
+    break;
+  default:
+    break; // 未识别业务码: 直接丢弃
   }
 }
 
@@ -625,6 +712,21 @@ void uart4RxProcessTask(void *argument) {
           Position_msg.yaw_speed = pos_data.yaw_speed;
           Position_data_pub.Publish(Position_msg);
         }
+      }
+    }
+  }
+}
+
+void uart7RxProcessTask(void *argument) {
+  (void)argument;
+  for (;;) {
+    (void)osSemaphoreAcquire(uart7_rx_semphore, osWaitForever);
+    UartPort::Packet packet{};
+    while (uart7_port.Read(packet)) {
+      for (uint16_t i = 0; i < packet.len; ++i) {
+        VisionProtocol::Frame frame{};
+        if (vision_protocol.processByte(packet.data[i], frame))
+          visionDispatch(frame);
       }
     }
   }

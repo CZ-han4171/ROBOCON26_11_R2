@@ -134,4 +134,11 @@ typedef struct {
 
 } pub_Position_Data;
 
+/* 视觉/上位机下发的导航位姿 (业务码0x0101) */
+struct VisionNavPoseMsg {
+  int16_t x_mm;
+  int16_t y_mm;
+  int16_t yaw_deg;
+};
+
 #pragma pack()

@@ -24,10 +24,10 @@
 #define MAX_ROS_DATA_LENGTH                                                    \
   128 // 其实没啥参考意义，只是标注数据段缓冲区大小最大为128字节
 
-#define HEADER1 0xFF
-#define HEADER2 0xFE
-#define TAIL1 0xFD
-#define TAIL2 0xFB
+#define ROS_HEADER1 0xFF
+#define ROS_HEADER2 0xFE
+#define ROS_TAIL1 0xFD
+#define ROS_TAIL2 0xFB
 
 class ROSProtocol {
   enum class ros_protocol_state {

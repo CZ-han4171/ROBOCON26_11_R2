@@ -39,6 +39,7 @@ void uart4RxProcessTask(void *argument);
 void uart5RxProcessTask(void *argument);
 void uart1RxProcessTask(void *argument);
 void uart6RxProcessTask(void *argument);
+void uart7RxProcessTask(void *argument);
 void uart8RxProcessTask(void *argument);
 void uart9RxProcessTask(void *argument);
 void uart10RxProcessTask(void *argument);
