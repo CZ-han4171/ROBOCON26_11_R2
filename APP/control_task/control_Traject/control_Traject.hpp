@@ -1,3 +1,4 @@
+#pragma once
 #include "main.h"
 #include "control_task.h"
 #include "pid_controller.h"

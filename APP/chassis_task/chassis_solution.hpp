@@ -37,8 +37,8 @@ public:
         float track_width_m;    // 轮距
         float wheel_base_m;     // 轴距
 
-        Geometry(float wheel_diameter = 0.16f, float track_width = 1.025f,
-                 float wheel_base = 1.025f)
+        Geometry(float wheel_diameter = 0.15378f, float track_width = 0.44f,
+                 float wheel_base = 0.38f)
             : wheel_diameter_m(wheel_diameter), track_width_m(track_width),
               wheel_base_m(wheel_base) {}
     };
