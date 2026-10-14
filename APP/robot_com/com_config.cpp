@@ -91,8 +91,11 @@ C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
 C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
 DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
                          DM4310Motor::PosWithSpeed);
-
-
+// 抬升电机
+C610Motor lift_2006_motor1(&fdcan1_bus, 0x201, 0, 0x200, 0);
+C610Motor lift_2006_motor2(&fdcan1_bus, 0x202, 0, 0x200, 0);
+C620Motor lift_3508_motor1(&fdcan1_bus, 0x203, 0, 0x200, 0);
+C620Motor lift_3508_motor2(&fdcan1_bus, 0x204, 0, 0x200, 0);
 // 串口外设（回调+信号量唤醒处理线程进行解包）
 void onUsbRxCb(const uint8_t *data, size_t len, void *user);
 
@@ -197,10 +200,11 @@ uint8_t comServiceInit() {
   chassis_motor3.init();
   chassis_motor4.init();
 
-  U8_1.init(1.0f, 21);
-  U8_2.init(1.0f, 21);
-  U8_3.init(1.0f, 21);
-  U8_4.init(1.0f, 21);
+  // ---- 抬升电机初始化 ----
+  lift_2006_motor1.init();
+  lift_2006_motor2.init();
+  lift_3508_motor1.init();
+  lift_3508_motor2.init();
 
   arm2006_motor.init();
   arm3508_motor.init();
@@ -217,11 +221,11 @@ uint8_t comServiceInit() {
   fdcan2_bus.registerDevice(&arm3508_motor);
   fdcan2_bus.registerDevice(&arm4310_motor);
 
-  fdcan1_bus.registerDevice(&U8_1);
-  fdcan1_bus.registerDevice(&U8_2);
-  fdcan1_bus.registerDevice(&U8_3);
-  fdcan1_bus.registerDevice(&U8_4);
-  
+  // ---- 抬升电机初始化 ----
+  fdcan1_bus.registerDevice(&lift_2006_motor1);
+  fdcan1_bus.registerDevice(&lift_2006_motor2);
+  fdcan1_bus.registerDevice(&lift_3508_motor1);
+  fdcan1_bus.registerDevice(&lift_3508_motor2);
   // 串口外设
   uart2_rx_semphore = osSemaphoreNew(1, 0, NULL);
   if (uart2_rx_semphore == NULL || uart2_port.startRx() != HAL_OK) {
@@ -293,15 +297,23 @@ void onUsbRxCb(const uint8_t *data, size_t len, void *user) {
 
 void can1SendTask(void *argument) {
   TickType_t currentTime = xTaskGetTickCount();
+  CanBus::ClassicPack pack;
+  pack.type = CanBus::Type::STANDARD;
+  uint8_t len = 8;  
+  const uint32_t lift_motor_ids[4] = {0x201, 0x202, 0x203, 0x204};
 
   for (;;) {
+    // 一帧固定打包 4 个槽位：0x201~0x204
+    pack.id = 0x200; // DJI Group 2
 
-    fdcan1_bus.addCanMsg(U8_1.VESCMotorCanTrans());
-    fdcan1_bus.addCanMsg(U8_2.VESCMotorCanTrans());
-    fdcan1_bus.addCanMsg(U8_3.VESCMotorCanTrans());
-    fdcan1_bus.addCanMsg(U8_4.VESCMotorCanTrans());
-
-    vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
+    int16_t commands[4] = {0};
+    commands[0] = static_cast<int16_t>(lift_2006_motor1.cmdTrans()); // 0x201
+    commands[1] = static_cast<int16_t>(lift_2006_motor2.cmdTrans()); // 0x202
+    commands[2] = static_cast<int16_t>(lift_3508_motor1.cmdTrans()); // 0x203
+    commands[3] = static_cast<int16_t>(lift_3508_motor2.cmdTrans()); // 0x204
+    packDJIMotorCanMsg(pack.id,lift_motor_ids, commands, 4, pack.data, len);
+    fdcan1_bus.addCanMsg(pack);
+    vTaskDelayUntil(&currentTime, 1); // 每 1 ms 执行一次发送任务
   }
 }
 

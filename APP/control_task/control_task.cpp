@@ -24,8 +24,25 @@
 #include <cstdint>
 #include "control_Traject.hpp"
 #include "Motor.hpp"
+#include "point_tracker.hpp"
+#include "stair_seq.hpp"   
+#include "mission.hpp"
 
 osThreadId_t ControlTaskHandle;
+extern volatile float odom_y_mm; 
+extern volatile float odom_x_mm;            
+extern volatile float lift_2006_dist_mm;
+extern volatile bool  lift_at_target;
+extern volatile float g_chassis_yaw_deg;
+extern volatile float g_yaw_rel_deg; 
+extern volatile bool imu_ready;
+bool rc_ready = false; 
+static bool turn_stick_last = false; 
+constexpr int32_t kTurnStickThresh = 400;    
+constexpr float   kTurn90  = 90.0f;
+constexpr float   kTurn180 = 180.0f;
+
+
 
 // ===== 发布者 =====
 TypedTopicPublisher<pub_chassis_cmd> chassis_data_pub("chassis_cmd");
@@ -38,6 +55,9 @@ TypedTopicSubscriber<pub_RM_Data> control_rm_sub("rm", 8);
 pub_RM_Data control_rm_cmd{};
 pub_RM_Data control_rm_cmd_last{};
 
+TypedTopicPublisher<pub_lift_cmd> lift_data_pub("lift_cmd");
+pub_lift_cmd lift_cmd{};
+
 TypedTopicSubscriber<pub_Position_Data> control_position_sub("position", 8);
 pub_Position_Data control_position_msg{};
 pub_Position_Data control_position{};
@@ -45,8 +65,8 @@ pub_Position_Data control_position{};
 pub_chassis_cmd robot_v_aim_cmd{};
 pub_chassis_cmd state_now_cmd{};
 
-extern VESCMotor U8_3;
-int32_t U8_3_erpm = 0;
+PointTracker tracker{};//点跟踪器对象
+pub_chassis_cmd track_out{}; 
 
 void controlInit() {
     if (!chassis_data_pub.IsValid()) {
@@ -60,6 +80,12 @@ void controlInit() {
     if (!control_position_sub.IsValid()) {
         return;
     }
+    control_rm_cmd.joyLHori = kJoyCenter;
+    control_rm_cmd.joyLVert = kJoyCenter;
+    control_rm_cmd.joyRHori = kJoyCenter;
+    control_rm_cmd.joyRVert = kJoyCenter;
+    control_rm_cmd_last = control_rm_cmd;
+    
     // if (!control_ir_sub.IsValid()) {
     //     return;
     // }
@@ -90,8 +116,10 @@ void controlTask(void *argument) {
         // controlTask_dt = DWT_GetDeltaT(&controlTask_DWT_CNT);
         //test begin
         const TickType_t now = xTaskGetTickCount();
-        if (control_rm_sub.TryGet(&control_rm_cmd)) {
+        const bool rm_updated = control_rm_sub.TryGet(&control_rm_cmd);
+        if (rm_updated) {
             rcUpdateTime = now;
+            rc_ready = true;  
         } else if (now - rcUpdateTime > kRemoteInputTimeout) {
             control_rm_cmd.joyLHori = kJoyCenter;
             control_rm_cmd.joyLVert = kJoyCenter;
@@ -99,7 +127,32 @@ void controlTask(void *argument) {
             control_rm_cmd.joyRVert = kJoyCenter;
         }
         control_rm_cmd_last = control_rm_cmd;
+        if (!rc_ready)
+        {
+            vTaskDelayUntil(&currentTime, 5);
+            continue;
+        }
 
+        const bool tr_mode = (control_rm_cmd.swC == RM_3_POS_SW_State_t::MIDDLE);
+        static bool swC_last = false;
+        if (tr_mode && !swC_last && imu_ready)
+        {
+            tracker.SetTarget(odom_x_mm, odom_y_mm, g_yaw_rel_deg); 
+            tracker.SetTarget(-1600.0f, 2095.0f, 0.0f); 
+        }
+        swC_last = tr_mode;
+
+        lift_cmd.high_mode = (control_rm_cmd.swD == RM_2_POS_SW_State_t::DOWN);
+        lift_cmd.lift_2006_input = JoyToVelocity(control_rm_cmd.joyRVert, kJoyDeadZoneRight, 1.0f);
+
+        const bool turn_mode = (control_rm_cmd.swB == RM_3_POS_SW_State_t::MIDDLE ||
+                                control_rm_cmd.swB == RM_3_POS_SW_State_t::DOWN);
+        const float turn_angle =
+            (control_rm_cmd.swB == RM_3_POS_SW_State_t::DOWN) ? kTurn180 : kTurn90;
+
+        const int32_t rstick = (int32_t)control_rm_cmd.joyRHori - (int32_t)kJoyCenter;
+        const bool stick_left  = (rstick < -kTurnStickThresh);
+        const bool stick_right = (rstick >  kTurnStickThresh);
         {
             rm_cmd.linear_x_ = JoyToVelocity(control_rm_cmd.joyLHori, kJoyDeadZoneLeft, MAX_VELOCITY_LINEAR);
             rm_cmd.linear_y_ = JoyToVelocity(control_rm_cmd.joyLVert, kJoyDeadZoneLeft, MAX_VELOCITY_LINEAR);
@@ -109,13 +162,61 @@ void controlTask(void *argument) {
             v_aim = sqrt(rm_cmd.linear_x_ * rm_cmd.linear_x_ + rm_cmd.linear_y_ * rm_cmd.linear_y_);
             robot_v_aim_cmd.linear_x_ = v_aim * cos((rm_angle_deg - state_now_cmd.omega_) * kDegToRad);
             robot_v_aim_cmd.linear_y_ = v_aim * sin((rm_angle_deg - state_now_cmd.omega_) * kDegToRad);
-            robot_v_aim_cmd.omega_ = rm_cmd.omega_;    
+            robot_v_aim_cmd.omega_ = turn_mode ? 0.0f : rm_cmd.omega_;
+            const bool stick_push = stick_left || stick_right;
+            robot_v_aim_cmd.turn_delta_deg = 0.0f;                      
+            if (turn_mode && !lift_cmd.high_mode && stick_push && !turn_stick_last) { 
+                robot_v_aim_cmd.turn_delta_deg = stick_left ? +turn_angle : -turn_angle;
+            }
+            if (turn_mode)
+            {
+                robot_v_aim_cmd.linear_x_ = 0.0f;
+                robot_v_aim_cmd.linear_y_ = 0.0f;
+            }
+            turn_stick_last = (turn_mode && stick_push);
         }
-
-        U8_3.setMotorCtrl(U8_3_erpm, VESCMotor::VESC_MODE::SET_ERPM);
+        robot_v_aim_cmd.yaw_hold_enable = !lift_cmd.high_mode;   
+        if (lift_cmd.high_mode) {
+            robot_v_aim_cmd.linear_x_ = 0.0f;      //高位模式底盘不动
+            robot_v_aim_cmd.linear_y_ = 0.0f;
+            robot_v_aim_cmd.omega_    = 0.0f;
+        }
+        track_out = tracker.Update(odom_x_mm,  odom_y_mm,  g_yaw_rel_deg);
+        if (tr_mode && !lift_cmd.high_mode)
+        {
+            float vx = track_out.linear_x_;
+            float vy = track_out.linear_y_;
+            const float vmax = 0.3f;
+            const float vmag = sqrtf(vx * vx + vy * vy);
+            if (vmag > vmax) {
+                const float k = vmax / vmag;
+                vx *= k;
+                vy *= k;
+            }
+            robot_v_aim_cmd.linear_x_ = vx;
+            robot_v_aim_cmd.linear_y_ = vy;
+            robot_v_aim_cmd.omega_ = 0.0f;
+            robot_v_aim_cmd.turn_delta_deg = 0.0f;
+        }
+        // swA：高位/低位切换
+        lift_cmd.request_high = false;
+        lift_cmd.request_low = false;
+        if (rm_updated && (control_rm_cmd.swA != control_rm_cmd.swA_last)) {
+            if (control_rm_cmd.swA == RM_2_POS_SW_State_t::UP) {
+                lift_cmd.request_low = true;
+            } else {
+                lift_cmd.request_high = true;
+            }
+        }
+        mission_Update(rm_updated, control_rm_cmd,
+                       odom_x_mm, odom_y_mm, g_yaw_rel_deg,
+                       tracker, track_out, robot_v_aim_cmd);
+        stairSeq_Update(rm_updated, control_rm_cmd, odom_x_mm, odom_y_mm, g_yaw_rel_deg,
+                        lift_2006_dist_mm,
+                        lift_at_target, lift_cmd, robot_v_aim_cmd, tracker, track_out);
 
         chassis_data_pub.Publish(robot_v_aim_cmd);
-
+        lift_data_pub.Publish(lift_cmd);
         vTaskDelayUntil(&currentTime, 5);
     }
 }

@@ -34,3 +34,9 @@ inline int8_t sign(double value) {
     else if (value < 0) return -1;
     else return 0;
 }
+
+inline float normalizeDeg(float a) {   
+    while (a >  180.0f) a -= 360.0f;
+    while (a < -180.0f) a += 360.0f;
+    return a;
+}

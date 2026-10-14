@@ -24,7 +24,7 @@
 #include "com_config.h"
 #include "control_task.h"
 #include "debug_task.h"
-
+#include "lift_task.h"
 /* module层接口头文件 */
 
 /* Definitions for TaskHand */
@@ -51,7 +51,7 @@ extern osThreadId_t PosCtrlTaskHandle;
 extern osThreadId_t DebugSerialTaskHandle;
 extern osThreadId_t omniIrSendTaskHandle;
 extern osThreadId_t whisperIrSendTaskHandle;
-
+extern osThreadId_t LiftTaskHandle;
 
 void osTaskInit(void) {
   const osThreadAttr_t CAN1_SendTaskHandle_attributes = {
@@ -93,6 +93,14 @@ void osTaskInit(void) {
   ChassisTaskHandle =
       osThreadNew(chassisTask, NULL, &ChassisTaskHandle_attributes);
 
+ const osThreadAttr_t LiftTaskHandle_attributes = {
+      .name = "Lift_TaskHandle",
+      .stack_size = 256 * 4,
+      .priority = (osPriority_t)osPriorityNormal,
+  };
+  LiftTaskHandle =
+      osThreadNew(liftTask, NULL, &LiftTaskHandle_attributes);
+  
   const osThreadAttr_t ControlTaskHandle_attributes = {
       .name = "Control_TaskHandle",
       .stack_size = 512 * 4,

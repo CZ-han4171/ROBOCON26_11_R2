@@ -106,6 +106,8 @@ typedef struct {
   float linear_x_;
   float linear_y_;
   float omega_;
+  bool yaw_hold_enable;
+  float turn_delta_deg;
 } pub_chassis_cmd;
 
 // 底盘速度
@@ -133,5 +135,13 @@ typedef struct {
   float yaw_speed;
 
 } pub_Position_Data;
+
+typedef struct{
+ bool high_mode;        //2006模式（高位移动）标志
+ float lift_2006_input;
+ bool request_high;  //升高到高位
+ bool request_low;   //降低到低位
+ bool  hold;
+} pub_lift_cmd;
 
 #pragma pack()
