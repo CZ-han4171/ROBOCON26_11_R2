@@ -99,6 +99,7 @@ typedef struct {
   bool arm2006_motor;
   bool arm3508_motor;
   bool arm4310_motor;
+  bool arm4340_motor;
 } pub_motor_status;
 
 // 发布底盘运动指令
@@ -121,6 +122,32 @@ typedef struct {
   float y;
   float yaw;
 } chassis_position;
+
+typedef struct 
+{ 
+  float lift_pos;
+  float lift_speed;
+  
+  float rotate_pos;
+  float rotate_speed;
+
+  float flip_pos;
+  float flip_speed;
+  
+  float extend_pos;
+  float extend_speed;
+
+  bool enable;
+  bool suction_on;
+}arm_cmd;
+
+// High-level arm request. The current remote control publishes this topic;
+// a future main-controller receiver can publish the same message instead.
+typedef struct {
+  uint8_t sequence_id;     // 0 START, 1 FETCH, 2 HOLD, 255 stop/hold
+  bool enable;
+  uint32_t release_count;  // Increment for each release event.
+} arm_sequence_cmd;
 
 //Position模块数据结构体
 typedef struct {

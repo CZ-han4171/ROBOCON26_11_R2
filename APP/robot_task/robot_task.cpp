@@ -19,6 +19,8 @@
 #include "task.h"
 
 /* bsp 层接口头文件 */
+#include "arm_task.hpp"
+#include "arm_workflow_task.hpp"
 #include "bsp_dwt.h"
 #include "chassis_task.h"
 #include "com_config.h"
@@ -51,7 +53,9 @@ extern osThreadId_t PosCtrlTaskHandle;
 extern osThreadId_t DebugSerialTaskHandle;
 extern osThreadId_t omniIrSendTaskHandle;
 extern osThreadId_t whisperIrSendTaskHandle;
-
+extern osThreadId_t armTaskHandle;
+osThreadId_t ArmWorkflowTaskHandle;
+extern osThreadId_t ArmDJMotorTaskHandle;
 
 void osTaskInit(void) {
   const osThreadAttr_t CAN1_SendTaskHandle_attributes = {
@@ -100,6 +104,15 @@ void osTaskInit(void) {
   };
   ControlTaskHandle =
       osThreadNew(controlTask, NULL, &ControlTaskHandle_attributes);
+
+  const osThreadAttr_t ArmWorkflowTaskHandle_attributes = {
+      .name = "ArmWorkflowTaskHandle",
+      .stack_size = 512 * 4,
+      // Match the former controlTask priority that ran the arm workflow.
+      .priority = (osPriority_t)osPriorityBelowNormal7,
+  };
+  ArmWorkflowTaskHandle =
+      osThreadNew(armWorkflowTask, NULL, &ArmWorkflowTaskHandle_attributes);
 
       //uart2用于同IMU串口通信
   const osThreadAttr_t Uart2ProcessTaskHandle_attributes = {
@@ -168,4 +181,20 @@ void osTaskInit(void) {
   };
   uart3SendTaskHandle =
       osThreadNew(uart3SendTask, NULL, &Uart3SendTaskHandle_attributes);
+
+  const osThreadAttr_t armTaskHandle_attributes = {
+      .name = "armTaskHandle",
+      .stack_size = 256 * 4,
+      .priority = (osPriority_t)osPriorityNormal1,
+  };
+  armTaskHandle =
+    osThreadNew(armTask, NULL, &armTaskHandle_attributes);
+
+  const osThreadAttr_t ArmDJMotorTaskHandle_attributes = {
+      .name = "ArmDJMotorTaskHandle",
+      .stack_size = 256 * 4,
+      .priority = (osPriority_t)osPriorityNormal1,
+  };
+  ArmDJMotorTaskHandle =
+    osThreadNew(ArmDJMotorTask, NULL, &ArmDJMotorTaskHandle_attributes);
 }

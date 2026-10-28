@@ -87,11 +87,12 @@ VESCMotor U8_3(&fdcan1_bus, 0x967, true, 103, true);
 VESCMotor U8_4(&fdcan1_bus, 0x968, true, 104, true);
 
 //上层电机
-C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
-C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
+C610Motor arm2006_motor(&fdcan2_bus, 0x203, 0, 0x200, 0);
+C620Motor arm3508_motor(&fdcan2_bus, 0x204, 0, 0x200, 0);
 DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
                          DM4310Motor::PosWithSpeed);
-
+DM4340Motor arm4340_motor(&fdcan2_bus, 0x302, 0x002,
+                          DM4340Motor::PosWithSpeed);
 
 // 串口外设（回调+信号量唤醒处理线程进行解包）
 void onUsbRxCb(const uint8_t *data, size_t len, void *user);
@@ -203,8 +204,9 @@ uint8_t comServiceInit() {
   U8_4.init(1.0f, 21);
 
   arm2006_motor.init();
-  arm3508_motor.init();
+  arm3508_motor.init(134.0f , 20000.0f);
   arm4310_motor.init();
+  arm4340_motor.init();
 
   // ---- 底盘电机初始化 ----
   fdcan3_bus.registerDevice(&chassis_motor1);
@@ -216,6 +218,7 @@ uint8_t comServiceInit() {
   fdcan2_bus.registerDevice(&arm2006_motor);
   fdcan2_bus.registerDevice(&arm3508_motor);
   fdcan2_bus.registerDevice(&arm4310_motor);
+  fdcan2_bus.registerDevice(&arm4340_motor);
 
   fdcan1_bus.registerDevice(&U8_1);
   fdcan1_bus.registerDevice(&U8_2);
@@ -312,9 +315,9 @@ void can2SendTask(void *argument) {
   pack.type = CanBus::Type::STANDARD;
 
   uint8_t len = 8;
-  const uint32_t arm_motor_ids[4] = {0x205, 0x206, 0x207, 0x208};
+  const uint32_t arm_motor_ids[4] = {0x203, 0x204, 0x207, 0x208};
   for (;;) {
-    pack.id = 0x1FF; // DJI Group 2
+    pack.id = 0x200; // DJI Group 2
     // 当前仅有 0x201(arm2006) 和 0x203(arm3508)，其余槽位置 0
     int16_t commands[4] = {0};
  
@@ -324,7 +327,7 @@ void can2SendTask(void *argument) {
     commands[2] = static_cast<int16_t>(0); // 0x203
     commands[3] = static_cast<int16_t>(0); // 0x204
     packDJIMotorCanMsg(pack.id, arm_motor_ids, commands, 4, pack.data, len);
-    // fdcan2_bus.addCanMsg(pack);
+    fdcan2_bus.addCanMsg(pack);
 
     vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
   }
@@ -446,7 +449,7 @@ void DebugSerialTask(void *argument) {
     title[4] =  arm2006_motor.isOffline() ? 'X' : 'O';
     title[5] =  arm3508_motor.isOffline() ? 'X' : 'O';
     title[6] =  arm4310_motor.isOffline() ? 'X' : 'O';
-
+    title[7] =  arm4340_motor.isOffline() ? 'X' : 'O';
 
     motor_status_data.chassis_motor1 = chassis_motor1.isOffline();
     motor_status_data.chassis_motor2 = chassis_motor2.isOffline();
@@ -455,6 +458,7 @@ void DebugSerialTask(void *argument) {
     motor_status_data.arm2006_motor = arm2006_motor.isOffline();
     motor_status_data.arm3508_motor = arm3508_motor.isOffline();
     motor_status_data.arm4310_motor = arm4310_motor.isOffline();
+    motor_status_data.arm4340_motor = arm4340_motor.isOffline();
 
     motor_status_pub.Publish(motor_status_data);
 

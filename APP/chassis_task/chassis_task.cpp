@@ -80,8 +80,11 @@ void chassisTask(void *argument) {
 
         if (chassis_cmd_sub.TryGet(&chassis_chassis_cmd)) {
         }
-        // 无论有没有新命令，都持续执行解算
-        Omnichassis_solver.run(chassis_chassis_cmd);
+        // Arm-only operation: keep all chassis motor current commands at zero.
+        chassis_motor1.setMotorCmd(0);
+        chassis_motor2.setMotorCmd(0);
+        chassis_motor3.setMotorCmd(0);
+        chassis_motor4.setMotorCmd(0);
         vTaskDelayUntil(&currentTime, 1);
     }
 }
